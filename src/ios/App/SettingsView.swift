@@ -51,7 +51,7 @@ struct SettingsView: View {
     // leave the store's own @Published value - the thing the live pad actually reads -
     // stale until relaunch. Binding straight to the store is what makes a change here
     // reach a game already running with the pad on screen.
-    @AppStorage(PreviewPadStore.enabledKey) private var previewPadEnabled = false
+    @AppStorage(PreviewPadStore.enabledKey) private var previewPadEnabled = true
     @ObservedObject private var previewPad = PreviewPadStore.shared
     @State private var showingLayoutExporter = false
     @State private var showingLayoutImporter = false

@@ -556,9 +556,13 @@ struct EmulatorViewOptimized: View {
     /// under you, exactly like the two sliders next to it.
     @AppStorage(ControllerLayoutSettings.joystickKey)
     private var joystickMode = ControllerLayoutSettings.defaultJoystick
-    /// Off by default - see the branch on this flag a few lines below for exactly what
-    /// it swaps in and why the shipping path is otherwise untouched.
-    @AppStorage(PreviewPadStore.enabledKey) private var previewPadEnabled = false
+    /// Defaults ON in this preview/showcase-sneak-peek build specifically (main keeps
+    /// this false) - the entire point of a sneak-peek build is to demonstrate the new
+    /// pad system on first launch rather than leave it hidden behind a Settings toggle
+    /// a tester has to already know to flip. See the branch on this flag a few lines
+    /// below for exactly what it swaps in and why the shipping path is otherwise
+    /// untouched.
+    @AppStorage(PreviewPadStore.enabledKey) private var previewPadEnabled = true
     @ObservedObject private var previewPad = PreviewPadStore.shared
     // The two feel settings, offered here as well as in Settings for the same reason the
     // toggle is: a deadzone is not something you can judge from a settings screen with no
