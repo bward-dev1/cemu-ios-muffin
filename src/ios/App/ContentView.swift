@@ -545,6 +545,14 @@ struct EmulatorViewOptimized: View {
     /// still in edit mode because that is how they last left them.
     @State private var isEditingControlLayout = false
     @State private var isPaused = false
+    /// Visible only while the preview pad is on. Exists purely to answer one question
+    /// with certainty and without needing log.txt: does a tap on the preview pad even
+    /// reach this closure at all. If this counter never moves when you tap a button,
+    /// the break is in the SwiftUI gesture layer (PreviewControllerPad/HeldControl); if
+    /// it does move but the game still doesn't react, the break is further down, in the
+    /// bridge or the engine's input override path.
+    @State private var previewInputDebugText = "no input yet"
+    @State private var previewInputDebugCount = 0
     /// The same two keys the pad itself reads. Declared here as well so the in-game
     /// sliders write to the thing being dragged, with no plumbing between them.
     @AppStorage(ControllerLayoutSettings.scaleKey)
@@ -737,9 +745,13 @@ struct EmulatorViewOptimized: View {
                         PreviewControllerPad(
                             store: previewPad,
                             onInput: { label, pressed in
+                                previewInputDebugCount += 1
+                                previewInputDebugText = "\(label) \(pressed ? "down" : "up") (#\(previewInputDebugCount))"
                                 cemu_bridge_set_button_state(cemuBridgeButton(forLabel: label), pressed)
                             },
                             onStick: { stick, position in
+                                previewInputDebugCount += 1
+                                previewInputDebugText = "stick\(stick) (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y))) (#\(previewInputDebugCount))"
                                 cemu_bridge_set_stick_axis(
                                     stick == 0 ? CEMU_BRIDGE_STICK_LEFT : CEMU_BRIDGE_STICK_RIGHT,
                                     Float(position.x), Float(position.y)
@@ -747,6 +759,22 @@ struct EmulatorViewOptimized: View {
                             },
                             isEditingLayout: $isEditingControlLayout
                         )
+
+                        // Debug HUD: proves whether SwiftUI ever calls onInput/onStick at
+                        // all, which is exactly the question a "controls don't do anything"
+                        // report can't answer from the outside. Temporary, and gone the
+                        // moment the real bug is found - not something to leave shipping.
+                        VStack {
+                            Text("PAD DEBUG: \(previewInputDebugText)")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.yellow)
+                                .padding(6)
+                                .background(Color.black.opacity(0.7))
+                                .cornerRadius(6)
+                                .padding(.top, 4)
+                            Spacer()
+                        }
+                        .allowsHitTesting(false)
                     }
                 } else {
                     #if os(iOS)
