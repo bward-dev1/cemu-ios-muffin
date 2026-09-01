@@ -303,6 +303,34 @@ uint32 MetalPipelineCache::BeginLoading(uint64 cacheTitleId)
 		s_cache->UseCompression(false);
 		g_mtlCacheState.pipelineMaxFileIndex = s_cache->GetMaximumFileIndex();
 	}
+
+	// Best-effort: a failed archive is not a failed boot. Every caller of
+	// GetBinaryArchive() already has to handle nullptr (persistence-off uses the same
+	// path - BeginLoading is simply never called then), so a creation failure here just
+	// falls back to compiling every pipeline from source every launch, same as before
+	// this existed.
+	cemu_assert_debug(m_binaryArchive == nullptr);
+	if (g_shaderCachePersistenceEnabled.load(std::memory_order_relaxed))
+	{
+		const auto archivePath = ActiveSettings::GetCachePath("shaderCache/precompiled/{:016x}_mtlbinaries.bin", cacheTitleId);
+		NS::Error* archiveError = nullptr;
+		NS::SharedPtr<MTL::BinaryArchiveDescriptor> descriptor = NS::TransferPtr(MTL::BinaryArchiveDescriptor::alloc()->init());
+		std::error_code existsEc;
+		if (fs::exists(archivePath, existsEc) && !existsEc)
+			descriptor->setUrl(NS::URL::fileURLWithPath(ToNSString(_pathToUtf8(archivePath))));
+		m_binaryArchive = m_mtlr->GetDevice()->newBinaryArchive(descriptor.get(), &archiveError);
+		if (!m_binaryArchive)
+		{
+			cemuLog_log(LogType::Force, "Metal: failed to open/create binary archive {} - falling back to uncached shader compilation this session ({})",
+				_pathToUtf8(archivePath),
+				archiveError ? archiveError->localizedDescription()->utf8String() : "no error info");
+		}
+		else
+		{
+			m_binaryArchiveTitleId = cacheTitleId;
+		}
+	}
+
 	return s_cache->GetFileCount();
 }
 
@@ -357,6 +385,25 @@ void MetalPipelineCache::Close()
         delete s_cache;
         s_cache = nullptr;
     }
+
+	if (m_binaryArchive)
+	{
+		// Every pipeline compiled this session already called addRenderPipelineFunctions
+		// (see MetalPipelineCompiler::Compile()), so the archive in memory already holds
+		// everything worth keeping - this just writes it out. Directory already exists
+		// from BeginLoading's fs::create_directories() on shaderCache/precompiled.
+		const auto archivePath = ActiveSettings::GetCachePath("shaderCache/precompiled/{:016x}_mtlbinaries.bin", m_binaryArchiveTitleId);
+		NS::Error* archiveError = nullptr;
+		if (!m_binaryArchive->serializeToURL(NS::URL::fileURLWithPath(ToNSString(_pathToUtf8(archivePath))), &archiveError))
+		{
+			cemuLog_log(LogType::Force, "Metal: failed to save binary archive {} - shaders compiled this session will not speed up the next launch ({})",
+				_pathToUtf8(archivePath),
+				archiveError ? archiveError->localizedDescription()->utf8String() : "no error info");
+		}
+		m_binaryArchive->release();
+		m_binaryArchive = nullptr;
+		m_binaryArchiveTitleId = 0;
+	}
 }
 
 struct CachedPipeline
