@@ -1,5 +1,6 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalCommon.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineCompiler.h"
+#include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalRenderer.h"
 #include "Cafe/HW/Latte/Renderer/Metal/CachedFBOMtl.h"
 #include "Cafe/HW/Latte/Renderer/Metal/LatteToMtl.h"
@@ -370,6 +371,34 @@ bool MetalPipelineCompiler::Compile(bool forceCompile, bool isRenderThread, bool
 #ifdef CEMU_DEBUG_ASSERT
         desc->setLabel(GetLabel("Render pipeline state", desc));
 #endif
+
+        // Mesh pipelines (the branch above) are deliberately not archived: metal-cpp
+        // here has no addMeshRenderPipelineFunctions, and every device this port
+        // actually targets reports SupportsMeshShaders() == false anyway (mesh draws
+        // already take the rects-emulation/GS path instead), so there is nothing to
+        // gain by chasing that API down right now. Plain render pipelines are the
+        // overwhelming majority of what gets compiled regardless.
+        //
+        // addRenderPipelineFunctions() is called every time, hit or miss: on a cache
+        // hit it is a fast no-op (the entry is already there), and on a miss it is what
+        // actually records this pipeline into the archive for serializeToURL() at
+        // Close() to pick up - skipping it on a miss would mean the archive on disk
+        // never grows past whatever a previous session already saved.
+        MTL::BinaryArchive* archive = MetalPipelineCache::GetInstance().GetBinaryArchive();
+        if (archive)
+        {
+            NS::Error* archiveError = nullptr;
+            desc->setBinaryArchives(NS::Array::array(archive));
+            if (!archive->addRenderPipelineFunctions(desc, &archiveError))
+            {
+                // Not fatal or even unusual - a shader using a feature the archive
+                // format can't represent yet is a known Metal limitation, not a bug
+                // here. Compilation below proceeds exactly as if there were no archive.
+                cemuLog_logOnce(LogType::Force, "Metal: pipeline could not be added to the binary archive ({})",
+                    archiveError ? archiveError->localizedDescription()->utf8String() : "no error info");
+            }
+        }
+
        	pipeline = m_mtlr->GetDevice()->newRenderPipelineState(desc, MTL::PipelineOptionNone, nullptr, &error);
     }
     auto end = std::chrono::high_resolution_clock::now();
