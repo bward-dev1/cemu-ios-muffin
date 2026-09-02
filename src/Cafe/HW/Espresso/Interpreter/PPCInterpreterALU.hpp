@@ -512,6 +512,10 @@ static void PPCInterpreter_DIVWU(PPCInterpreter_t* hCPU, uint32 opcode)
 	uint32 b = hCPU->gpr[rB];
 	if (b == 0)
 		hCPU->gpr[rD] = 0;
+	// note: unlike DIVW, there's no INT_MIN/-1 trap case for the unsigned divide - the branch
+	// below looks like it was carried over from DIVW's a==0x80000000/b==0xFFFFFFFF special case,
+	// but for unsigned values a(0x80000000) < b(0xFFFFFFFF) always, so a/b is already 0 and the
+	// "else" arm below would compute the identical result. Verified harmless, left alone.
 	else if (a == 0x80000000 && b == 0xFFFFFFFF)
 		hCPU->gpr[rD] = 0;
 	else
@@ -842,28 +846,16 @@ static void PPCInterpreter_SRAWI(PPCInterpreter_t* hCPU, uint32 opcode)
 	sint32 rS, rA;
 	uint32 SH;
 	PPC_OPC_TEMPL_X(opcode, rS, rA, SH);
-	hCPU->gpr[rA] = hCPU->gpr[rS];
-	hCPU->xer_ca = 0;
-	if (hCPU->gpr[rA] & 0x80000000)
-	{
-		uint32 ca = 0;
-		for (uint32 i = 0; i < SH; i++)
-		{
-			if (hCPU->gpr[rA] & 1)
-				ca = 1;
-			hCPU->gpr[rA] >>= 1;
-			hCPU->gpr[rA] |= 0x80000000;
-		}
-		if (ca)
-			hCPU->xer_ca = 1;
-	}
-	else
-	{
-		if (SH > 31)
-			hCPU->gpr[rA] = 0;
-		else
-			hCPU->gpr[rA] >>= SH;
-	}
+	// SH is a 5-bit immediate (0-31), so this is the same closed-form CA/shift computation as
+	// the SH<=31 path in SRAW above (bit-by-bit loop replaced with the mask trick - verified
+	// equivalent for every SH/sign combination, including SH==0 where the mask goes to 0 and
+	// both the shifted-out-bits check and the shift itself become no-ops, matching the old
+	// loop's zero-iteration behavior).
+	uint32 s = hCPU->gpr[rS];
+	uint8 caBit = (s >> 31) & 1;
+	uint32 shiftedBits = s & ~(0xFFFFFFFFu << SH);
+	hCPU->xer_ca = caBit & (shiftedBits != 0 ? 1 : 0);
+	hCPU->gpr[rA] = (uint32)((sint32)s >> SH);
 	if (opHasRC())
 		ppc_update_cr0(hCPU, hCPU->gpr[rA]);
 	PPCInterpreter_nextInstruction(hCPU);
