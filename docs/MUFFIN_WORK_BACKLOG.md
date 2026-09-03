@@ -372,6 +372,24 @@ none has been run on a device.
   way mesh pipelines already handle "can't go in the archive format":
   skip adding it, gated on the same `m_rasterizationEnabled` check that
   already governs the fragment function itself.
+- **Fixed a real crash hit twice tonight: `FreeReservation` dereferenced
+  an invalid iterator on a double-free.** Two independent device crashes,
+  both signal 11 inside `MetalSynchronizedHeapAllocator::FreeReservation`
+  at the exact same instruction offset, from the GPU/Latte render thread —
+  at different memory-pressure levels each time (~290MB once, ~1.2-1.4GB
+  the other), which doesn't fit a pure memory-exhaustion story the way
+  this session's leak-driven crashes did. Recurring at the identical
+  location independent of memory pressure is what a real logic bug looks
+  like. Found it: the function looked up the allocation via `std::find_if`
+  and guarded the "not found" case with `cemu_assert_debug(it != end())`
+  — a no-op in Release builds — then unconditionally dereferenced
+  `it->allocation` on the next line regardless. A double-free (or any call
+  with a reservation this allocator never tracked) makes `find_if` return
+  `end()`, the assert does nothing, and the dereference is undefined
+  behaviour — matching the crash exactly. Doesn't identify *why* some
+  caller frees a reservation twice (still open), but converts the crash
+  into a logged anomaly plus an early return, with the pooled reservation
+  object still freed either way. Going into v20.
 
 ---
 
