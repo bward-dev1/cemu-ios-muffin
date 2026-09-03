@@ -356,6 +356,22 @@ none has been run on a device.
   retired the now-stale "tap the stick to press L3" special case, since
   L3's own dot is never removed anymore — consistent with R3, which never
   had that special case either.
+- **Fixed shader binary archive save silently failing for a whole
+  session (sneak-peek only — the binary-archive feature itself was never
+  merged to `main`).** Real device log from v19: `serializeToURL()`
+  failing outright with "expecting 'fragment' stage in pipeline".
+  `MetalPipelineCompiler::Compile()` added every non-mesh pipeline to the
+  binary archive unconditionally, but a rasterization-disabled pipeline
+  (shadow maps, depth-only passes — common) never gets a fragment
+  function set, and Apple's own archive packer can't serialize an entry
+  missing one. `addRenderPipelineFunctions()` itself succeeds at add
+  time; the failure only surfaces later when `Close()` serializes the
+  *whole* archive in one call — so one fragment-less pipeline anywhere in
+  a session silently failed to persist every pipeline learned that
+  session, directly undermining Persistent Shader Cache. Fixed the same
+  way mesh pipelines already handle "can't go in the archive format":
+  skip adding it, gated on the same `m_rasterizationEnabled` check that
+  already governs the fragment function itself.
 
 ---
 
