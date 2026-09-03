@@ -384,7 +384,22 @@ bool MetalPipelineCompiler::Compile(bool forceCompile, bool isRenderThread, bool
         // actually records this pipeline into the archive for serializeToURL() at
         // Close() to pick up - skipping it on a miss would mean the archive on disk
         // never grows past whatever a previous session already saved.
-        MTL::BinaryArchive* archive = MetalPipelineCache::GetInstance().GetBinaryArchive();
+        //
+        // Skipped entirely when !m_rasterizationEnabled: a real device log showed
+        // serializeToURL() failing outright with "expecting 'fragment' stage in
+        // pipeline" - Apple's own archive packer cannot serialize an entry with no
+        // fragment function, which is exactly what a rasterization-disabled pipeline
+        // (shadow maps, depth-only passes - both common, not exotic) has, since the
+        // line above only sets one when m_rasterizationEnabled is true.
+        // addRenderPipelineFunctions() itself succeeds at add time either way - the
+        // failure only surfaces later, when Close() calls serializeToURL() on the
+        // WHOLE archive at once, which means one fragment-less pipeline anywhere in
+        // it silently failed to persist every pipeline learned that session, not just
+        // the one that couldn't be archived. Same reasoning as skipping mesh
+        // pipelines above: some pipelines cannot be represented in the archive
+        // format, so skip archiving that one pipeline rather than losing the whole
+        // session's cache to it.
+        MTL::BinaryArchive* archive = m_rasterizationEnabled ? MetalPipelineCache::GetInstance().GetBinaryArchive() : nullptr;
         if (archive)
         {
             NS::Error* archiveError = nullptr;
